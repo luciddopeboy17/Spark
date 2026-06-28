@@ -2040,8 +2040,7 @@ local configsPage = registerTab("Configs")
 addHeader("Configuration Profiles", configsPage)
 addToggle("Auto Execute Script", configsPage, false, function(state)
     if state and queue_on_teleport then
-        -- IMPORTANT: Replace the URL below with your actual raw script link (e.g. from GitHub/Pastebin)
-        local loadstringCode = "loadstring(game:HttpGet('YOUR_GITHUB_RAW_URL_HERE'))()"
+        local loadstringCode = "loadstring(game:HttpGet('https://raw.githubusercontent.com/luciddopeboy17/Spark/main/Orion.lua'))()"
         queue_on_teleport(loadstringCode)
         print("Script successfully queued for next teleport!")
     elseif state then
