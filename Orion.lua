@@ -40,6 +40,10 @@ local LockedTarget = nil
 local AimTargetPart = "Head"
 local fovCheckAimbotEnabled = false
 
+local AutoAttackEnabled = false
+local AutoAttackKey = Enum.KeyCode.F
+local AutoAttackRange = 20
+
 -- Modern Dark Palette (Default "Orion Blue")
 local COLORS = {
     Background = Color3.fromRGB(15, 15, 15),
@@ -268,7 +272,210 @@ local function makeResizable(resizerBtn, frameToResize, sidebar, contentArea)
 end
 
 ------------------------------------------------------------------------
--- MAIN INTERFACE BUILDER
+-- ORION GAME HUB LAUNCHER (DYNAMIC)
+------------------------------------------------------------------------
+local MarketplaceService = game:GetService("MarketplaceService")
+local LauncherEvent = Instance.new("BindableEvent")
+
+local SupportedGames = {}
+-- We don't use task.spawn here because we merged it with the UI builder spawn below!
+
+local LauncherGui = create("ScreenGui", {
+    Name = "OrionLauncher",
+    ResetOnSpawn = false,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+    IgnoreGuiInset = true,
+    Parent = TargetParent
+})
+
+local LauncherFrame = create("Frame", {
+    Size = UDim2.new(0, 620, 0, 460),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    BackgroundColor3 = COLORS.Background,
+    BackgroundTransparency = 0.05,
+    ClipsDescendants = true,
+    Parent = LauncherGui
+})
+addCorner(LauncherFrame, 12)
+addStroke(LauncherFrame, COLORS.Border, 1.2)
+
+local L_TopBar = create("Frame", {
+    Size = UDim2.new(1, 0, 0, 38),
+    BackgroundTransparency = 1,
+    Parent = LauncherFrame
+})
+makeDraggable(L_TopBar, LauncherFrame)
+
+local L_Title = create("TextLabel", {
+    Size = UDim2.new(1, 0, 1, 0),
+    Position = UDim2.new(0, 15, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "Orion Hub | Select Script",
+    TextColor3 = COLORS.TextMain,
+    TextSize = 14,
+    Font = Enum.Font.GothamBold,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = L_TopBar
+})
+
+local L_Scroll = create("ScrollingFrame", {
+    Size = UDim2.new(1, -30, 1, -55),
+    Position = UDim2.new(0, 15, 0, 40),
+    BackgroundTransparency = 1,
+    ScrollBarThickness = 2,
+    CanvasSize = UDim2.new(0, 0, 0, 0),
+    Parent = LauncherFrame
+})
+local L_Grid = create("UIGridLayout", {
+    CellPadding = UDim2.new(0, 12, 0, 12),
+    CellSize = UDim2.new(0, 136, 0, 180),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    Parent = L_Scroll
+})
+L_Grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    L_Scroll.CanvasSize = UDim2.new(0, 0, 0, L_Grid.AbsoluteContentSize.Y + 20)
+end)
+
+local L_Universal = create("TextButton", {
+    BackgroundColor3 = COLORS.Card,
+    Text = "",
+    AutoButtonColor = false,
+    LayoutOrder = 1,
+    Parent = L_Scroll
+})
+addCorner(L_Universal, 8)
+addStroke(L_Universal, COLORS.Border, 1)
+
+local U_Icon = create("ImageLabel", {
+    Size = UDim2.new(1, 0, 1, 0),
+    BackgroundTransparency = 1,
+    Image = "rbxassetid://10650965314", -- Placeholder cool universal icon
+    ScaleType = Enum.ScaleType.Crop,
+    Parent = L_Universal
+})
+addCorner(U_Icon, 8)
+
+local U_Gradient = create("Frame", {
+    Size = UDim2.new(1, 0, 0.35, 0),
+    Position = UDim2.new(0, 0, 0.65, 0),
+    BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+    BackgroundTransparency = 0.2,
+    BorderSizePixel = 0,
+    Parent = L_Universal
+})
+addCorner(U_Gradient, 8)
+create("Frame", { Size = UDim2.new(1, 0, 0.2, 0), BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 0.2, BorderSizePixel = 0, Parent = U_Gradient })
+
+local U_Title = create("TextLabel", {
+    Size = UDim2.new(1, -10, 1, 0),
+    Position = UDim2.new(0, 5, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "Universal Hub",
+    TextColor3 = COLORS.Accent,
+    TextSize = 13,
+    Font = Enum.Font.GothamBold,
+    TextWrapped = true,
+    TextYAlignment = Enum.TextYAlignment.Center,
+    Parent = U_Gradient
+})
+L_Universal.MouseButton1Click:Connect(function()
+    LauncherGui:Destroy()
+    LauncherEvent:Fire(true)
+end)
+
+task.delay(0.1, function()
+    -- Dynamically fetch scripts from GitHub first
+    pcall(function()
+        local HttpService = game:GetService("HttpService")
+        local response = game:HttpGet("https://api.github.com/repos/luciddopeboy17/Spark/contents")
+        local data = HttpService:JSONDecode(response)
+        for _, file in ipairs(data) do
+            if file.type == "file" and file.name:match("^%d+%.lua$") then
+                local id = tonumber(file.name:match("^(%d+)%.lua$"))
+                if id then
+                    table.insert(SupportedGames, id)
+                end
+            end
+        end
+    end)
+
+    -- Now build the cards using the fetched data concurrently
+    for _, gameId in ipairs(SupportedGames) do
+        task.spawn(function()
+            local success, info = pcall(function()
+                return MarketplaceService:GetProductInfo(gameId)
+            end)
+            
+            local gameName = success and info.Name or ("Unknown Game (" .. tostring(gameId) .. ")")
+            local iconAsset = (success and info.IconImageAssetId and info.IconImageAssetId > 0) 
+                and ("rbxthumb://type=Asset&id=" .. info.IconImageAssetId .. "&w=150&h=150") 
+                or ""
+                
+            local card = create("TextButton", {
+                BackgroundColor3 = COLORS.Card,
+                Text = "",
+                AutoButtonColor = false,
+                LayoutOrder = 2,
+                Parent = L_Scroll
+            })
+            addCorner(card, 8)
+            addStroke(card, COLORS.Border, 1)
+            
+            local icon = create("ImageLabel", {
+                Size = UDim2.new(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                Image = iconAsset,
+                ScaleType = Enum.ScaleType.Crop,
+                Parent = card
+            })
+            addCorner(icon, 8)
+            
+            local gradient = create("Frame", {
+                Size = UDim2.new(1, 0, 0.35, 0),
+                Position = UDim2.new(0, 0, 0.65, 0),
+                BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+                BackgroundTransparency = 0.2,
+                BorderSizePixel = 0,
+                Parent = card
+            })
+            addCorner(gradient, 8)
+            create("Frame", { Size = UDim2.new(1, 0, 0.2, 0), BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 0.2, BorderSizePixel = 0, Parent = gradient })
+            
+            local title = create("TextLabel", {
+                Size = UDim2.new(1, -10, 1, 0),
+                Position = UDim2.new(0, 5, 0, 0),
+                BackgroundTransparency = 1,
+                Text = gameName,
+                TextColor3 = COLORS.TextMain,
+                TextSize = 12,
+                Font = Enum.Font.GothamBold,
+                TextWrapped = true,
+                TextYAlignment = Enum.TextYAlignment.Center,
+                Parent = gradient
+            })
+            
+            card.MouseButton1Click:Connect(function()
+                LauncherGui:Destroy()
+                print("[Orion Hub] Fetching dynamic script: " .. gameId .. ".lua")
+                
+                local s, err = pcall(function()
+                    local code = game:HttpGet("https://raw.githubusercontent.com/luciddopeboy17/Spark/main/" .. tostring(gameId) .. ".lua")
+                    local func = loadstring(code)
+                    if func then func() end
+                end)
+                if not s then warn("[Orion Hub] Failed to load script: " .. tostring(err)) end
+            end)
+        end)
+    end
+end)
+
+-- Halt execution until Universal is chosen
+local shouldLoadUniversal = LauncherEvent.Event:Wait()
+if not shouldLoadUniversal then return end
+
+------------------------------------------------------------------------
+-- MAIN INTERFACE BUILDER (UNIVERSAL HUB)
 ------------------------------------------------------------------------
 -- 1. ScreenGui Container
 local ScreenGui = create("ScreenGui", {
@@ -857,10 +1064,10 @@ local function addDropdown(labelText, options, default, page, callback)
         local menu = create("Frame", {
             Name = dropName,
             Size = UDim2.new(0, selector.AbsoluteSize.X, 0, targetMenuHeight),
-            Position = UDim2.new(0, selector.AbsolutePosition.X - MainFrame.AbsolutePosition.X, 0, selector.AbsolutePosition.Y - MainFrame.AbsolutePosition.Y + selector.AbsoluteSize.Y + 2),
+            Position = UDim2.new(0, selector.AbsolutePosition.X, 0, selector.AbsolutePosition.Y + selector.AbsoluteSize.Y + 2),
             BackgroundColor3 = COLORS.Background,
             ZIndex = 100,
-            Parent = MainFrame
+            Parent = ScreenGui
         })
         addCorner(menu, 8)
         addStroke(menu, COLORS.Border, 1)
@@ -1050,6 +1257,16 @@ local function addKeybind(labelText, default, page, callback)
                     keybind = key
                     bindBtn.Text = key.Name
                 end
+                isBinding = false
+                callback(keybind)
+                connection:Disconnect()
+            elseif input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 or input.UserInputType == Enum.UserInputType.MouseButton3 then
+                keybind = input.UserInputType
+                local name = keybind.Name
+                if name == "MouseButton1" then name = "LMB"
+                elseif name == "MouseButton2" then name = "RMB"
+                elseif name == "MouseButton3" then name = "MMB" end
+                bindBtn.Text = name
                 isBinding = false
                 callback(keybind)
                 connection:Disconnect()
@@ -1479,242 +1696,251 @@ RunService.RenderStepped:Connect(function()
 end)
 
 ------------------------------------------------------------------------
--- FUNCTIONAL ESP & INFO MANAGEMENT
+-- NEW HIGH PERFORMANCE DRAWING API ESP ENGINE
 ------------------------------------------------------------------------
-local function getEntityDisplayName(entity)
-    -- Smart scanner to find custom nametags inside the entity model
-    for _, desc in ipairs(entity:GetDescendants()) do
-        if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-            local text = desc.Text
-            if text and text ~= "" and text ~= "Label" and text ~= "TextLabel" then
-                -- Look for common nametag identifiers in the parent or label name
-                local pName = desc.Parent and desc.Parent.Name:lower() or ""
-                local dName = desc.Name:lower()
-                if pName:match("name") or pName:match("tag") or pName:match("billboard") or pName:match("title") or 
-                   dName:match("name") or dName:match("tag") or dName:match("title") then
-                    -- Clean rich text tags if any exist
-                    local cleanText = text:gsub("<[^>]+>", "")
-                    return cleanText
+local DrawingPool = {}
+function DrawingPool:Create(type)
+    local ok, d = pcall(function() return Drawing.new(type) end)
+    if ok then d.Visible = false; return d end
+    return nil
+end
+function DrawingPool:Destroy(d) pcall(function() d:Remove() end) end
+
+local ESPUtils = {}
+function ESPUtils:GetCharacter(player)
+    if not player then return nil end
+    return player.Character
+end
+
+function ESPUtils:GetDistance(pos)
+    if not LocalPlayer.Character then return 99999 end
+    local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if root then return (root.Position - pos).Magnitude end
+    return 99999
+end
+
+function ESPUtils:FormatNumber(n) return tostring(math.floor(n + 0.5)) end
+
+local function GetCharBounds(character)
+    if not character then return nil end
+    local cam = Camera
+    if not cam then return nil end
+    
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    local any = false
+    
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            local size = part.Size
+            local cf = part.CFrame
+            local corners = {
+                cf * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2),
+                cf * CFrame.new(-size.X/2, -size.Y/2, size.Z/2),
+                cf * CFrame.new(-size.X/2, size.Y/2, -size.Z/2),
+                cf * CFrame.new(-size.X/2, size.Y/2, size.Z/2),
+                cf * CFrame.new(size.X/2, -size.Y/2, -size.Z/2),
+                cf * CFrame.new(size.X/2, -size.Y/2, size.Z/2),
+                cf * CFrame.new(size.X/2, size.Y/2, -size.Z/2),
+                cf * CFrame.new(size.X/2, size.Y/2, size.Z/2),
+            }
+            for _, c in pairs(corners) do
+                local sp, onScreen = cam:WorldToViewportPoint(c.Position)
+                if onScreen then
+                    any = true
+                    minX = math.min(minX, sp.X)
+                    minY = math.min(minY, sp.Y)
+                    maxX = math.max(maxX, sp.X)
+                    maxY = math.max(maxY, sp.Y)
                 end
             end
         end
     end
-    -- Fallback to default name if no custom tag is found
-    return entity.Name
+    
+    if any and minX ~= math.huge then
+        return Vector2.new(minX, minY), Vector2.new(maxX, maxY)
+    end
+    return nil
 end
 
-local function applyESP(entity)
-    if not entity:IsA("Model") or entity.Name == LocalPlayer.Name then return end
-    
-    task.spawn(function()
-        local root = entity:WaitForChild("HumanoidRootPart", 5)
-        local humanoid = entity:WaitForChild("Humanoid", 5)
-        if not root or not humanoid then return end
-        if humanoid.Health <= 0 then return end
-        
-        local old = nil
-        for _, gui in ipairs(TargetParent:GetChildren()) do
-            if ((gui:IsA("BillboardGui") and (gui.Name == "OrionESP_Box" or gui.Name == "OrionESP_Name" or gui.Name == "OrionESP_Health")) or 
-               (gui:IsA("Highlight") and gui.Name == "OrionHighlight")) and 
-               (gui.Adornee == root or gui.Adornee == entity) then
-                gui:Destroy()
-            end
+local PlayerESP = {}
+PlayerESP.__index = PlayerESP
+
+function PlayerESP.new(player)
+    local self = setmetatable({}, PlayerESP)
+    self.Player = player
+    self.Drawings = {
+        Box = DrawingPool:Create("Square"),
+        BoxOutline = DrawingPool:Create("Square"),
+        Name = DrawingPool:Create("Text"),
+        Distance = DrawingPool:Create("Text"),
+        Health = DrawingPool:Create("Text"),
+        HealthBar = DrawingPool:Create("Square"),
+        HealthBarOutline = DrawingPool:Create("Square")
+    }
+    self.Highlight = nil
+    return self
+end
+
+function PlayerESP:Update()
+    local ok, err = pcall(function()
+        local char = ESPUtils:GetCharacter(self.Player)
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not char or not hum or hum.Health <= 0 then
+            self:Hide()
+            return
         end
         
+        local topLeft, bottomRight = GetCharBounds(char)
+        if not topLeft then self:Hide(); return end
+        
+        local size = bottomRight - topLeft
+        if size.X < 4 or size.Y < 4 then self:Hide(); return end
+        
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local dist = root and ESPUtils:GetDistance(root.Position) or 0
+        local color = EspColor
+        
+        -- Box
         if EspEnabled then
-            local bgui = Instance.new("BillboardGui")
-            bgui.Name = "OrionESP_Box"
-            bgui.AlwaysOnTop = true
-            bgui.ClipsDescendants = false
-            bgui.Size = UDim2.new(4.2, 0, 5.8, 0)
-            bgui.Adornee = root
-            bgui.Parent = TargetParent
+            self.Drawings.BoxOutline.Size = size + Vector2.new(2, 2)
+            self.Drawings.BoxOutline.Position = topLeft - Vector2.new(1, 1)
+            self.Drawings.BoxOutline.Visible = true
+            self.Drawings.BoxOutline.Color = Color3.new(0, 0, 0)
+            self.Drawings.BoxOutline.Thickness = 1
+            self.Drawings.BoxOutline.Filled = false
             
-            local borderFrame = Instance.new("Frame")
-            borderFrame.Name = "BorderFrame"
-            borderFrame.Size = UDim2.new(1, 0, 1, 0)
-            borderFrame.BackgroundTransparency = 1
-            borderFrame.BorderSizePixel = 0
-            borderFrame.Visible = EspEnabled
-            borderFrame.Parent = bgui
-            
-            local stroke = Instance.new("UIStroke")
-            stroke.Thickness = 2.0
-            stroke.Color = EspColor
-            stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
-            stroke.Parent = borderFrame
-            
-            local corner = Instance.new("UICorner")
-            corner.CornerRadius = UDim.new(0, 4)
-            corner.Parent = borderFrame
-        end
-
-        if EspHealthEnabled then
-            local hbgui = Instance.new("BillboardGui")
-            hbgui.Name = "OrionESP_Health"
-            hbgui.AlwaysOnTop = true
-            hbgui.ClipsDescendants = false
-            hbgui.Size = UDim2.new(0, 4, 5.8, 0)
-            hbgui.Adornee = root
-            hbgui.StudsOffset = Vector3.new(-2.3, 0, 0)
-            hbgui.Parent = TargetParent
-
-            local healthContainer = Instance.new("Frame")
-            healthContainer.Name = "HealthContainer"
-            healthContainer.Size = UDim2.new(1, 0, 1, 0)
-            healthContainer.Position = UDim2.new(0, 0, 0, 0)
-            healthContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-            healthContainer.BorderSizePixel = 0
-            healthContainer.Parent = hbgui
-            
-            local healthStroke = Instance.new("UIStroke")
-            healthStroke.Color = Color3.fromRGB(0, 0, 0)
-            healthStroke.Thickness = 1
-            healthStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
-            healthStroke.Parent = healthContainer
-            
-            local healthCorner = Instance.new("UICorner")
-            healthCorner.CornerRadius = UDim.new(0, 2)
-            healthCorner.Parent = healthContainer
-            
-            local healthFill = Instance.new("Frame")
-            healthFill.Name = "Fill"
-            healthFill.Size = UDim2.new(1, 0, math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1), 0)
-            healthFill.Position = UDim2.new(0, 0, 1, 0)
-            healthFill.AnchorPoint = Vector2.new(0, 1)
-            healthFill.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
-            healthFill.BorderSizePixel = 0
-            healthFill.Parent = healthContainer
-            
-            local healthChangedConnection
-            healthChangedConnection = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
-                if humanoid.Health <= 0 then
-                    hbgui:Destroy()
-                    cleanSkeleton(entity)
-                    healthChangedConnection:Disconnect()
-                    return
-                end
-                local percent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
-                healthFill:TweenSize(UDim2.new(1, 0, percent, 0), "Out", "Quad", 0.15)
-                healthFill.BackgroundColor3 = Color3.fromRGB(255 * (1 - percent), 255 * percent, 0)
-            end)
-            
-            hbgui.Destroying:Connect(function()
-                if healthChangedConnection then healthChangedConnection:Disconnect() end
-            end)
-        end
-
-        if EspNameEnabled then
-            local nameBgui = Instance.new("BillboardGui")
-            nameBgui.Name = "OrionESP_Name"
-            nameBgui.Size = UDim2.new(0, 200, 0, 50)
-            nameBgui.Adornee = root
-            nameBgui.AlwaysOnTop = true
-            nameBgui.StudsOffset = Vector3.new(0, 3, 0)
-            nameBgui.Parent = TargetParent
-
-            local nameLabel = Instance.new("TextLabel")
-            nameLabel.Name = "NameLabel"
-            nameLabel.Size = UDim2.new(1, 0, 1, 0)
-            nameLabel.BackgroundTransparency = 1
-            nameLabel.Text = getEntityDisplayName(entity)
-            nameLabel.TextColor3 = EspColor
-            nameLabel.TextSize = 12
-            nameLabel.Font = Enum.Font.GothamBold
-            nameLabel.Parent = nameBgui
-            
-            local textStroke = Instance.new("UIStroke")
-            textStroke.Color = Color3.fromRGB(0, 0, 0)
-            textStroke.Thickness = 1.5
-            textStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
-            textStroke.Parent = nameLabel
+            self.Drawings.Box.Size = size
+            self.Drawings.Box.Position = topLeft
+            self.Drawings.Box.Visible = true
+            self.Drawings.Box.Color = color
+            self.Drawings.Box.Thickness = 1
+            self.Drawings.Box.Filled = false
+        else
+            self.Drawings.Box.Visible = false
+            self.Drawings.BoxOutline.Visible = false
         end
         
+        -- Name
+        if EspNameEnabled then
+            self.Drawings.Name.Text = self.Player.Name
+            self.Drawings.Name.Position = Vector2.new(topLeft.X + size.X/2, topLeft.Y - 16)
+            self.Drawings.Name.Size = 13
+            self.Drawings.Name.Center = true
+            self.Drawings.Name.Visible = true
+            self.Drawings.Name.Color = color
+            self.Drawings.Name.Outline = true
+        else
+            self.Drawings.Name.Visible = false
+        end
+        
+        -- Health (combined with distance text below it)
+        if EspHealthEnabled then
+            local hp = hum.Health
+            local maxHp = hum.MaxHealth
+            local pct = math.clamp(hp / maxHp, 0, 1)
+            
+            self.Drawings.Health.Text = ESPUtils:FormatNumber(hp) .. " HP | " .. ESPUtils:FormatNumber(dist) .. "m"
+            self.Drawings.Health.Position = Vector2.new(topLeft.X + size.X/2, bottomRight.Y + 4)
+            self.Drawings.Health.Size = 11
+            self.Drawings.Health.Center = true
+            self.Drawings.Health.Visible = true
+            self.Drawings.Health.Color = Color3.fromRGB(255*(1-pct), 255*pct, 0)
+            self.Drawings.Health.Outline = true
+            
+            local barW = size.X
+            local barH = 3
+            local barPos = Vector2.new(topLeft.X, topLeft.Y - 6)
+            
+            self.Drawings.HealthBarOutline.Size = Vector2.new(barW+2, barH+2)
+            self.Drawings.HealthBarOutline.Position = barPos - Vector2.new(1,1)
+            self.Drawings.HealthBarOutline.Visible = true
+            self.Drawings.HealthBarOutline.Color = Color3.new(0,0,0)
+            self.Drawings.HealthBarOutline.Filled = true
+            
+            self.Drawings.HealthBar.Size = Vector2.new(barW * pct, barH)
+            self.Drawings.HealthBar.Position = barPos
+            self.Drawings.HealthBar.Visible = true
+            self.Drawings.HealthBar.Color = Color3.fromRGB(255*(1-pct), 255*pct, 0)
+            self.Drawings.HealthBar.Filled = true
+        else
+            self.Drawings.Health.Visible = false
+            self.Drawings.HealthBar.Visible = false
+            self.Drawings.HealthBarOutline.Visible = false
+        end
+        
+        -- Outline (Chams)
         if EspOutlineEnabled then
-            local highlight = Instance.new("Highlight")
-            highlight.Name = "OrionHighlight"
-            highlight.FillColor = EspColor
-            highlight.FillTransparency = 0.6
-            highlight.OutlineColor = EspColor
-            highlight.OutlineTransparency = 0.1
-            highlight.Adornee = entity
-            highlight.Parent = TargetParent
+            if not self.Highlight then
+                self.Highlight = Instance.new("Highlight")
+                self.Highlight.Parent = char
+            end
+            self.Highlight.FillColor = color
+            self.Highlight.OutlineColor = color
+            self.Highlight.FillTransparency = 0.6
+            self.Highlight.OutlineTransparency = 0.1
+            self.Highlight.Enabled = true
+        elseif self.Highlight then
+            self.Highlight.Enabled = false
+        end
+    end)
+    if not ok then self:Hide() end
+end
+
+function PlayerESP:Hide()
+    for _, d in pairs(self.Drawings) do d.Visible = false end
+    if self.Highlight then self.Highlight.Enabled = false end
+end
+
+function PlayerESP:Destroy()
+    self:Hide()
+    for _, d in pairs(self.Drawings) do DrawingPool:Destroy(d) end
+    if self.Highlight then self.Highlight:Destroy() end
+end
+
+local ESPManager = {}
+ESPManager.PlayerObjects = {}
+
+function ESPManager:Init()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            self.PlayerObjects[plr] = PlayerESP.new(plr)
+        end
+    end
+    Players.PlayerAdded:Connect(function(plr)
+        if plr ~= LocalPlayer then self.PlayerObjects[plr] = PlayerESP.new(plr) end
+    end)
+    Players.PlayerRemoving:Connect(function(plr)
+        if self.PlayerObjects[plr] then
+            self.PlayerObjects[plr]:Destroy()
+            self.PlayerObjects[plr] = nil
+        end
+    end)
+    
+    RunService.RenderStepped:Connect(function()
+        for plr, esp in pairs(self.PlayerObjects) do
+            esp:Update()
         end
     end)
 end
 
-local function clearESP()
-    local folder = EntitiesFolder or workspace:FindFirstChild("Entities")
-    if not folder then return end
-    
-    for _, entity in ipairs(folder:GetChildren()) do
-        local root = entity:FindFirstChild("HumanoidRootPart")
-        if root then
-            for _, gui in ipairs(TargetParent:GetChildren()) do
-                if ((gui:IsA("BillboardGui") and (gui.Name == "OrionESP_Box" or gui.Name == "OrionESP_Name" or gui.Name == "OrionESP_Health")) or 
-                   (gui:IsA("Highlight") and gui.Name == "OrionHighlight")) and 
-                   (gui.Adornee == root or gui.Adornee == entity) then
-                    gui:Destroy()
-                end
-            end
-        end
-        cleanSkeleton(entity)
-    end
-end
-
-local function updateActiveESP()
-    refreshESP()
-end
+ESPManager:Init()
 
 local function refreshESP()
-    clearESP()
+    -- The Drawing API loop manages itself automatically via RunService.
+    -- Skeleton ESP still needs its manual refresh for now since it relies on LineHandleAdornments.
     
     local folder = EntitiesFolder or workspace:FindFirstChild("Entities")
     if not folder then return end
     
     for _, entity in ipairs(folder:GetChildren()) do
-        if EspEnabled or EspHealthEnabled or EspNameEnabled or EspOutlineEnabled then
-            applyESP(entity)
-        end
         if EspSkeletonEnabled then
             applySkeleton(entity)
         end
     end
 end
 
-local folderConnection = nil
-local folderRemoveConnection = nil
-local function bindFolderListener()
-    local folder = EntitiesFolder or workspace:FindFirstChild("Entities")
-    if not folder then return end
-    
-    if folderConnection then folderConnection:Disconnect() end
-    if folderRemoveConnection then folderRemoveConnection:Disconnect() end
-    
-    folderConnection = folder.ChildAdded:Connect(function(child)
-        task.wait(0.1)
-        if EspEnabled or EspHealthEnabled or EspNameEnabled or EspOutlineEnabled then
-            applyESP(child)
-        end
-        if EspSkeletonEnabled then
-            applySkeleton(child)
-        end
-    end)
-    
-    folderRemoveConnection = folder.ChildRemoved:Connect(function(child)
-        cleanSkeleton(child)
-        for _, gui in ipairs(TargetParent:GetChildren()) do
-            if gui:IsA("BillboardGui") or gui:IsA("Highlight") then
-                if gui.Adornee == child or (gui.Adornee and gui.Adornee.Parent == child) then
-                    gui:Destroy()
-                end
-            end
-        end
-    end)
-end
-
-bindFolderListener()
-
+-- Fallback EntitiesFolder discovery for Skeleton ESP
 task.spawn(function()
     while true do
         task.wait(5)
@@ -1722,7 +1948,6 @@ task.spawn(function()
             local folder = workspace:FindFirstChild("Entities")
             if folder then
                 EntitiesFolder = folder
-                bindFolderListener()
                 refreshESP()
             end
         end
@@ -1730,35 +1955,48 @@ task.spawn(function()
 end)
 
 ------------------------------------------------------------------------
--- HIGH-SPEED AIMBOT ENGINE (WITH VELOCITY PREDICTION)
+-- HIGH-SPEED AIMBOT ENGINE (WITH VELOCITY PREDICTION & RAYCASTING)
 ------------------------------------------------------------------------
 local function getClosestPlayerToCursor()
     local closestEntity = nil
     local shortestDistance = math.huge
     local mousePos = UserInputService:GetMouseLocation()
     
-    local folder = EntitiesFolder or workspace:FindFirstChild("Entities")
-    if not folder then return nil end
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     
-    for _, entity in ipairs(folder:GetChildren()) do
-        if entity:IsA("Model") and entity.Name ~= LocalPlayer.Name then
-            local targetPart = entity:FindFirstChild(AimTargetPart) or entity:FindFirstChild("Head")
-            local hum = entity:FindFirstChildOfClass("Humanoid")
-            if targetPart and hum and hum.Health > 0 then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                if onScreen then
-                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                    
-                    if fovCheckAimbotEnabled and fovEnabled then
-                        if dist <= fovRadius and dist < shortestDistance then
-                            shortestDistance = dist
-                            closestEntity = entity
-                        end
-                    else
-                        if dist < shortestDistance then
-                            shortestDistance = dist
-                            closestEntity = entity
-                        end
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        
+        local char = ESPUtils:GetCharacter(plr)
+        if not char then continue end
+        
+        local targetPart = char:FindFirstChild(AimTargetPart) or char:FindFirstChild("Head")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        
+        if targetPart and hum and hum.Health > 0 then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+            if onScreen then
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                
+                -- Visibility Check (Raycasting)
+                local rp = RaycastParams.new()
+                rp.FilterType = Enum.RaycastFilterType.Blacklist
+                rp.FilterDescendantsInstances = {Camera, myChar}
+                local res = workspace:Raycast(Camera.CFrame.Position, targetPart.Position - Camera.CFrame.Position, rp)
+                
+                -- If we hit something that IS NOT part of the enemy character, they are behind a wall
+                if res and not res.Instance:IsDescendantOf(char) then continue end
+                
+                if fovCheckAimbotEnabled and fovEnabled then
+                    if dist <= fovRadius and dist < shortestDistance then
+                        shortestDistance = dist
+                        closestEntity = char
+                    end
+                else
+                    if dist < shortestDistance then
+                        shortestDistance = dist
+                        closestEntity = char
                     end
                 end
             end
@@ -1768,18 +2006,47 @@ local function getClosestPlayerToCursor()
     return closestEntity
 end
 
+local AimbotMode = "Toggle"
+
+local function isBindMatched(input, bind)
+    if not bind then return false end
+    if bind.EnumType == Enum.KeyCode then
+        return input.KeyCode == bind
+    elseif bind.EnumType == Enum.UserInputType then
+        return input.UserInputType == bind
+    end
+    return false
+end
+
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
-    if input.KeyCode == LockKey and AimbotEnabled then
-        if LockedTarget then
-            LockedTarget = nil
-            print("[Orion Hub] Target unlocked.")
-        else
+    if isBindMatched(input, LockKey) and AimbotEnabled then
+        if AimbotMode == "Toggle" then
+            if LockedTarget then
+                LockedTarget = nil
+                print("[Orion Hub] Target unlocked.")
+            else
+                local target = getClosestPlayerToCursor()
+                if target then
+                    LockedTarget = target
+                    print("[Orion Hub] Targeted and locked onto: " .. target.Name)
+                end
+            end
+        elseif AimbotMode == "Hold" then
             local target = getClosestPlayerToCursor()
             if target then
                 LockedTarget = target
-                print("[Orion Hub] Targeted and locked onto: " .. target.Name)
+                print("[Orion Hub] Targeted and locked (Hold): " .. target.Name)
             end
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, processed)
+    if isBindMatched(input, LockKey) and AimbotEnabled and AimbotMode == "Hold" then
+        if LockedTarget then
+            LockedTarget = nil
+            print("[Orion Hub] Target unlocked (Released).")
         end
     end
 end)
@@ -1793,7 +2060,11 @@ RunService.RenderStepped:Connect(function()
             if part and root then
                 local targetVelocity = root.AssemblyLinearVelocity
                 local predictedPosition = part.Position + (targetVelocity * (1 / 60))
-                Camera.CFrame = CFrame.new(Camera.CFrame.Position, predictedPosition)
+                
+                -- Smooth Lerping
+                local smoothness = 0.5 -- Could be added as a UI slider later
+                local alpha = math.clamp(1.1 - smoothness, 0.02, 1)
+                Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, predictedPosition), alpha)
             else
                 LockedTarget = nil
             end
@@ -1819,9 +2090,6 @@ addKeybind("Aimbot Lock Key", Enum.KeyCode.E, aimbotPage, function(key)
     LockKey = key
     print("Lock Keybound to: ", key.Name)
 end)
-addToggle("Show Button (Mobile)", aimbotPage, false, function(state)
-    print("Mobile Button: ", state)
-end)
 addDropdown("Aim Target", {"Head", "Torso", "Left Arm", "Right Arm"}, "Head", aimbotPage, function(choice)
     AimTargetPart = choice
     print("Aim Target: ", choice)
@@ -1833,18 +2101,13 @@ addSlider("Smoothness", 0, 100, 0, aimbotPage, function(val)
     print("Smoothness: ", val)
 end)
 
-addHeader("Auto", aimbotPage)
-addToggle("Auto Attack", aimbotPage, false, function(state)
-    print("Auto Attack: ", state)
+addDropdown("Aimbot Mode", {"Toggle", "Hold"}, "Toggle", aimbotPage, function(choice)
+    AimbotMode = choice
+    if choice == "Toggle" then
+        LockedTarget = nil -- Reset target when switching modes to prevent bugs
+    end
+    print("Aimbot Mode: ", choice)
 end)
-addKeybind("Auto Attack Key", Enum.KeyCode.F, aimbotPage, function(key)
-    print("Auto Attack Bind: ", key.Name)
-end)
-addSlider("Auto Attack Range", 1, 100, 20, aimbotPage, function(val)
-    print("Attack Range: ", val)
-end)
-
-
 -- Visuals Tab Setup
 local visualsPage = registerTab("Visuals")
 
